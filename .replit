@@ -1,0 +1,11 @@
+run = "uvicorn scripts.main:app --reload --port 8000 --host 0.0.0.0"
+modules = ["python-3.11"]
+[nix]
+channel = "stable-24_05"
+
+[deployment]
+run = ["sh", "-c", "uvicorn scripts.main:app --reload --port 8000 --host 0.0.0.0"]
+
+[[ports]]
+localPort = 8000
+externalPort = 80
