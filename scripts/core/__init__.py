@@ -1,0 +1,1 @@
+from scripts.core.config import settings

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Request, HTTPException
 import logging
 from firebase_admin import auth
-from scripts.router.v1 import chat, evaluation
+from scripts.router.v1 import chat, evaluation, knowledge
 
 logger = logging.getLogger(__name__)
 
@@ -44,3 +44,4 @@ router = APIRouter(
 
 router.include_router(chat.router)
 router.include_router(evaluation.router)
+router.include_router(knowledge.router)

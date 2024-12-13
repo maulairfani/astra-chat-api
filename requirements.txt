@@ -2,3 +2,7 @@ fastapi==0.110.3
 uvicorn==0.23.2
 pyyaml==6.0.2
 firebase-admin==6.5.0
+langchain-groq==0.2.1
+chromadb==0.5.23
+langchain-chroma==0.1.4
+langchain-huggingface==0.1.2
