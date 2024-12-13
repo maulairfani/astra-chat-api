@@ -1,0 +1,1 @@
+Code Skripsi ges 😱😱😱
