@@ -1,19 +1,23 @@
 from fastapi import APIRouter, Request, Response
-from fastapi.responses import StreamingResponse
 from langchain_groq import ChatGroq
 import os
-from scripts.generation import ChatRequest
+from scripts.generation import ChatRequest, Generator
 from scripts.retrieval import Retriever
 
 router = APIRouter()
 
 @router.post("/chat")
-async def chat(request: Request, response: Response, chat_request: ChatRequest):
+async def chat(request: Request, response: Response, item: ChatRequest):
   # LLM
-  llm = ChatGroq(model=chat_request.model, api_key=os.environ['GROQ_API_KEY'])
+  llm = ChatGroq(model=item.model, api_key=os.environ['GROQ_API_KEY'])
   
   # Step 1: Retrieval
   retriever = Retriever(llm)
-  contexts = retriever.get_relevant_contents(chat_request)
-  return contexts
+  item.contexts = retriever.fetch_relevant_documents(item)
+
+  # Step 2: Generation
+  generator = Generator(item.model)
+  ai_response = generator.generate_response(item)
+  return ai_response
+  
 

@@ -3,60 +3,47 @@ import PyPDF2
 import json
 
 class PDFParser:
+  """Class for parsing and converting PDF to JSON with markdown content."""
+
   def parse(self, input_pdf="data/asii_2023_sustainability_report.pdf", output_json="data/parsed_pdf.json"):
-    pdf_data = {}
+    parsed_data = {}
 
-    for i in range(1, 211):
-      # Split PDF untuk setiap halaman
-      target_pdf = 'data/split.pdf'
-      self._split_pdf(input_pdf, target_pdf, i)
+    for page_number in range(1, 211):
+      split_pdf_path = 'data/split_page.pdf'
+      self._extract_single_page(input_pdf, split_pdf_path, page_number)
 
-      # Konversi PDF yang sudah dibagi ke format markdown
-      markdown = self._convert_pdf_to_markdown(target_pdf)
+      markdown_content = self._convert_to_markdown(split_pdf_path)
+      parsed_data[page_number] = markdown_content
 
-      # Simpan markdown ke dalam dictionary dengan key nomor halaman
-      pdf_data[i] = markdown
+    self._save_to_json(parsed_data, output_json)
 
-    # Simpan hasil konversi ke file JSON
-    try:
-      with open(output_json, 'w') as json_file:
-        json.dump(pdf_data, json_file, indent=4)
-
-      print(f"Hasil konversi PDF disimpan dalam '{output_json}'.")
-
-    except Exception as e:
-      print(f"Terjadi kesalahan saat menyimpan file JSON: {e}")
-
-  def _convert_pdf_to_markdown(self, pdf_path):
+  def _convert_to_markdown(self, pdf_path):
     converter = DocumentConverter()
     result = converter.convert(pdf_path)
     return result.document.export_to_markdown()
 
-  def _split_pdf(self, input_pdf, output_pdf, page_num):
+  def _extract_single_page(self, input_pdf, output_pdf, page_number):
     try:
-      # Buka file PDF input
-      with open(input_pdf, 'rb') as file:
-        reader = PyPDF2.PdfReader(file)
+      with open(input_pdf, 'rb') as pdf_file:
+        reader = PyPDF2.PdfReader(pdf_file)
         writer = PyPDF2.PdfWriter()
 
-        total_pages = len(reader.pages)
+        if 1 <= page_number <= len(reader.pages):
+          writer.add_page(reader.pages[page_number - 1])
 
-        # Validasi halaman yang diminta
-        if page_num < 1 or page_num > total_pages:
-          print(f"Halaman {page_num} tidak valid.")
-          return None
-
-        # Ambil halaman yang diminta
-        writer.add_page(reader.pages[page_num - 1])
-
-        # Simpan file PDF yang terpisah
-        with open(output_pdf, 'wb') as output_file:
-          writer.write(output_file)
-
-        return output_pdf
-
+          with open(output_pdf, 'wb') as output_file:
+            writer.write(output_file)
+        else:
+          print(f"Invalid page number: {page_number}.")
     except FileNotFoundError:
-      print(f"File '{input_pdf}' tidak ditemukan.")
-    except Exception as e:
-      print(f"Terjadi kesalahan: {e}")
+      print(f"File not found: {input_pdf}.")
+    except Exception as error:
+      print(f"Error extracting page {page_number}: {error}")
 
+  def _save_to_json(self, data, output_json):
+    try:
+      with open(output_json, 'w') as json_file:
+        json.dump(data, json_file, indent=2)
+      print(f"JSON saved to: {output_json}")
+    except Exception as error:
+      print(f"Error saving JSON: {error}")

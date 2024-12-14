@@ -1,162 +1,118 @@
 import os
 import json
 import re
-
+import shutil
 import firebase_admin
 from firebase_admin import credentials, firestore
-
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 import chromadb
-import shutil
-
 from scripts.core import settings
 
-
-class KnowledgeDB:
+class KnowledgeDatabase:
   def __init__(self):
-    self.embeddings_func = HuggingFaceEmbeddings(model_name=settings.EMBEDDING_MODEL_NAME)
-    self.docs_limit = 10
-    self.disclosure_path = "sustainabilityReports/ASII"
+    self.embedding_function = HuggingFaceEmbeddings(model_name=settings.EMBEDDING_MODEL_NAME)
+    self.document_limit = 999
+    self.firestore_path = "sustainabilityReports/ASII"
 
     self._initialize_firebase()
-    self.fsclient = firestore.client()
+    self.firestore_client = firestore.client()
 
   def _initialize_firebase(self):
-    """Initialize Firebase if not already initialized."""
+    "Initialize Firebase."
     if not firebase_admin._apps:
-      firebase_credentials_str = os.environ['FIREBASE_CREDENTIALS']
-      if not firebase_credentials_str:
-        raise ValueError("FIREBASE_CREDENTIALS environment variable is not set.")
-      cred_dict = json.loads(firebase_credentials_str)
-      cred = credentials.Certificate(cred_dict)
-      firebase_admin.initialize_app(cred)
+      firebase_credentials = os.environ.get('FIREBASE_CREDENTIALS')
+      if not firebase_credentials:
+        raise ValueError("Environment variable 'FIREBASE_CREDENTIALS' is not set.")
+      credentials_data = json.loads(firebase_credentials)
+      firebase_admin.initialize_app(credentials.Certificate(credentials_data))
 
-  def _load_docs_from_json(self, file_path: str) -> dict:
-    """Load and return the document data from a JSON file."""
+  def _load_documents_from_file(self, file_path):
+    "Load documents from a JSON file."
     if not os.path.exists(file_path):
       raise FileNotFoundError(f"The file {file_path} does not exist.")
-
     with open(file_path, 'r') as file:
-      docs_dict = json.load(file)
-    return docs_dict
+      return json.load(file)
 
-  def _extract_disclosed_indicators(self, page_content: str) -> str:
-    """
-    Extract all valid indicators from page_content.
-    Returns a string of disclosed indicators separated by semicolons.
-    """
-    matches = re.findall(r"\d+-\d+", page_content)
-    disclosed_set = {m for m in matches if m in settings.VALID_INDICATORS}
-    return ";".join(disclosed_set)
+  def _extract_valid_indicators(self, content):
+    "Extract valid indicators from content."
+    matches = re.findall(r"\d+-\d+", content)
+    return ";".join({match for match in matches if match in settings.VALID_INDICATORS})
 
-  def create_langchain_documents(self, file_path: str = "data/parsed_pdf.json", base_metadata: dict | None = None):
-    """
-    Creates LangChain Document objects along with their IDs from a given JSON file.
-
-    :param file_path: Path to the parsed PDF JSON file.
-    :param base_metadata: Optional base metadata to be included in each document.
-    :return: A tuple of (documents_list, ids_list).
-    """
-    docs_dict = self._load_docs_from_json(file_path)
+  def create_documents(self, file_path="data/parsed_pdf.json", base_metadata=None):
+    "Create LangChain Document objects."
+    documents_data = self._load_documents_from_file(file_path)
 
     documents = []
-    ids = []
+    document_ids = []
 
-    for page, page_content in list(docs_dict.items())[:self.docs_limit]:
-      doc_id = f"page-{page}"
-      ids.append(doc_id)
+    for page_number, page_content in list(documents_data.items())[:self.document_limit]:
+      document_id = f"page-{page_number}"
+      document_ids.append(document_id)
 
-      disclosed = self._extract_disclosed_indicators(page_content)
+      disclosed_indicators = self._extract_valid_indicators(page_content)
 
-      # Merge the base metadata with page-specific metadata
       metadata = (base_metadata.copy() if base_metadata else {})
-      metadata.update({"page": page, "disclosed": disclosed})
+      metadata.update({"page": page_number, "disclosed": disclosed_indicators})
 
       documents.append(Document(
         page_content=page_content,
         metadata=metadata,
-        id=doc_id
+        id=document_id
       ))
 
-    return documents, ids
+    return documents, document_ids
 
-  def create_disclosure_mapping(self, file_path: str = "data/parsed_pdf.json") -> dict:
-    """
-    Creates a mapping of indicator -> list of page IDs from the JSON file.
+  def create_disclosure_mapping(self, file_path="data/parsed_pdf.json"):
+    "Create mapping of indicators to page IDs."
+    documents_data = self._load_documents_from_file(file_path)
+    disclosure_mapping = {}
 
-    :param file_path: Path to the parsed PDF JSON file.
-    :return: Dictionary where keys are indicators and values are lists of page IDs.
-    """
-    docs_dict = self._load_docs_from_json(file_path)
-    disclosure_doc = {}
-
-    for idx, (page, page_content) in enumerate(docs_dict.items()):
-      if idx == self.docs_limit:
+    for index, (page_number, page_content) in enumerate(documents_data.items()):
+      if index == self.document_limit:
         break
 
       matches = re.findall(r"\d+-\d+", page_content)
-      valid_matches = [m for m in matches if m in settings.VALID_INDICATORS]
+      valid_matches = [match for match in matches if match in settings.VALID_INDICATORS]
 
       for indicator in valid_matches:
-        page_id = f"page-{page}"
-        if indicator not in disclosure_doc:
-          disclosure_doc[indicator] = [page_id]
-        elif page_id not in disclosure_doc[indicator]:
-          disclosure_doc[indicator].append(page_id)
+        page_id = f"page-{page_number}"
+        if indicator not in disclosure_mapping:
+          disclosure_mapping[indicator] = [page_id]
+        elif page_id not in disclosure_mapping[indicator]:
+          disclosure_mapping[indicator].append(page_id)
 
-    return disclosure_doc
+    return disclosure_mapping
 
-  def create_knowledge_db(self, file_path: str = "data/parsed_pdf.json"):
-    """
-    Creates a knowledge database by:
-    1. Extracting documents and creating a vector store.
-    2. Saving disclosure mappings to Firestore.
+  def create_knowledge_database(self, file_path="data/parsed_pdf.json"):
+    "Create knowledge database and save it."
+    documents, document_ids = self.create_documents(file_path=file_path)
+    disclosure_mapping = self.create_disclosure_mapping(file_path=file_path)
 
-    :param file_path: Path to the parsed PDF JSON file.
-    :return: True if successful.
-    """
-    # Create documents for vector store
-    documents, ids = self.create_langchain_documents(file_path=file_path)
-
-    # Create a disclosure mapping for Firestore
-    disclosure_doc = self.create_disclosure_mapping(file_path=file_path)
-
-    # Save to vector store
     vector_store = Chroma(
       collection_name=settings.COLLECTION_NAME,
       persist_directory=settings.PERSIST_DIRECTORY,
-      embedding_function=self.embeddings_func
+      embedding_function=self.embedding_function
     )
-    vector_store.add_documents(documents, ids=ids)
+    for doc, id in zip(documents, document_ids):
+      _ = vector_store.add_documents([doc], ids=[id])
+      print(_)
 
-    # Save disclosure mapping to Firestore
-    doc_ref = self.fsclient.document(self.disclosure_path)
-    doc_ref.set({'disclosure': disclosure_doc})
+    firestore_document = self.firestore_client.document(self.firestore_path)
+    firestore_document.set({'disclosure': disclosure_mapping})
 
     return True
 
-  def delete_knowledge_db(self):
-    """
-    Deletes the knowledge database by:
-    1. Resetting the local vector store.
-    2. Deleting the disclosure document from Firestore.
-    3. Removing the persisted directory.
-
-    :return: True if successful.
-    """
-
-    # Delete from vector store
+  def delete_knowledge_database(self):
+    "Delete the knowledge database."
     client = chromadb.PersistentClient(settings.PERSIST_DIRECTORY)
     client.reset()
 
-    # Remove the persisted directory
     if os.path.exists(settings.PERSIST_DIRECTORY):
-        shutil.rmtree(settings.PERSIST_DIRECTORY)
+      shutil.rmtree(settings.PERSIST_DIRECTORY)
 
-    # Delete from Firestore
-    doc_ref = self.fsclient.document(self.disclosure_path)
-    doc_ref.delete()
+    firestore_document = self.firestore_client.document(self.firestore_path)
+    firestore_document.delete()
 
     return True
